@@ -1,4 +1,4 @@
-FROM tomcat:latest
+FROM steigr/tomcat:latest
 
 ENV  servicedesk=servicedesk \
 		 JIRA_SERVICEDESK_VERSION=3.3.1
