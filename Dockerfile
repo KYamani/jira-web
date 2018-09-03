@@ -1,15 +1,15 @@
 FROM tomcat:latest
 
-ENV  APPLICATION_USER=servicedesk \
+ENV  servicedesk=servicedesk \
 		 JIRA_SERVICEDESK_VERSION=3.3.1
 
-RUN  addgroup -S $APPLICATION_USER \
- &&  adduser -h /app -G $APPLICATION_USER -g '' -S -D -H $APPLICATION_USER \
+RUN  addgroup -S servicedesk \
+ &&  adduser -h /app -G servicedesk -g '' -S -D -H servicedesk \
  &&  apk add --no-cache --virtual .build-deps tar curl \
- &&  install -D -d -o $APPLICATION_USER -g $APPLICATION_USER /app \
- &&  curl -L https://www.atlassian.com/software/jira/downloads/binary/atlassian-servicedesk-$JIRA_SERVICEDESK_VERSION.tar.gz \
-     | su-exec $APPLICATION_USER tar -x -z -C /app --strip-components=1 \
- &&  tomcat-install /app $APPLICATION_USER \
+ &&  install -D -d -o servicedesk -g servicedesk /app \
+ &&  curl -L https://www.atlassian.com/software/jira/downloads/binary/atlassian-servicedesk-3.3.1.tar.gz \
+     | su-exec servicedesk tar -x -z -C /app --strip-components=1 \
+ &&  tomcat-install /app servicedesk \
  &&  rm -rf /app/lib/hsqldb-*.jar \
             /app/lib/postgresql-*.jar \
             /app/README* \
@@ -26,7 +26,7 @@ RUN  addgroup -S $APPLICATION_USER \
 RUN  export MIDANAUTHENTICATOR_VERSION=1.1.0 \
  &&  apk add --no-cache --virtual .build-deps curl \
  &&  curl -L https://github.com/MIDAN-SOFTWARE/MIDANAuthenticator/releases/download/${MIDANAUTHENTICATOR_VERSION}/midan-authenticator-${MIDANAUTHENTICATOR_VERSION:0:3}.jar \
-     | install -D -o $APPLICATION_USER -g $APPLICATION_USER -m 0644 /dev/stdin /app/atlassian-jira/WEB-INF/lib/midan-authenticator-${MIDANAUTHENTICATOR_VERSION:0:3}.jar \
+     | install -D -o servicedesk -g servicedesk -m 0644 /dev/stdin /app/atlassian-jira/WEB-INF/lib/midan-authenticator-${MIDANAUTHENTICATOR_VERSION:0:3}.jar \
  &&  apk del .build-deps \
  &&  rm -rf /var/cache/apk/*
 
