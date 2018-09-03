@@ -1,99 +1,43 @@
-FROM docker-registry.sec.cloudwatt.com/ubuntu/18.04
+FROM tomcat:latest
 
-ARG application_version
+ENV  APPLICATION_USER=servicedesk \
+		 JIRA_SERVICEDESK_VERSION=3.3.1
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    bzip2 vim-tiny unzip xz-utils openjdk-8-jre-headless \
-    libtcnative-1 xmlstarlet
+RUN  addgroup -S $APPLICATION_USER \
+ &&  adduser -h /app -G $APPLICATION_USER -g '' -S -D -H $APPLICATION_USER \
+ &&  apk add --no-cache --virtual .build-deps tar curl \
+ &&  install -D -d -o $APPLICATION_USER -g $APPLICATION_USER /app \
+ &&  curl -L https://www.atlassian.com/software/jira/downloads/binary/atlassian-servicedesk-$JIRA_SERVICEDESK_VERSION.tar.gz \
+     | su-exec $APPLICATION_USER tar -x -z -C /app --strip-components=1 \
+ &&  tomcat-install /app $APPLICATION_USER \
+ &&  rm -rf /app/lib/hsqldb-*.jar \
+            /app/lib/postgresql-*.jar \
+            /app/README* \
+            /app/NOTICE* \
+            /app/licenses \
+            /app/tomcat-docs \
+ &&  xml c14n --without-comments /app/conf/server.xml | xml fo -s 2 > /app/conf/server.xml.tmp \
+ &&  mv /app/conf/server.xml.tmp /app/conf/server.xml \
+ &&  curl -Lo /app/lib/hsqldb-2.3.4.jar http://central.maven.org/maven2/org/hsqldb/hsqldb/2.3.4/hsqldb-2.3.4.jar \
+ &&  curl -Lo /app/lib/postgresql-42.0.0.jar https://jdbc.postgresql.org/download/postgresql-42.0.0.jar \
+ &&  apk del .build-deps \
+ &&  rm -rf /var/cache/apk/*
 
-RUN apt clean
+RUN  export MIDANAUTHENTICATOR_VERSION=1.1.0 \
+ &&  apk add --no-cache --virtual .build-deps curl \
+ &&  curl -L https://github.com/MIDAN-SOFTWARE/MIDANAuthenticator/releases/download/${MIDANAUTHENTICATOR_VERSION}/midan-authenticator-${MIDANAUTHENTICATOR_VERSION:0:3}.jar \
+     | install -D -o $APPLICATION_USER -g $APPLICATION_USER -m 0644 /dev/stdin /app/atlassian-jira/WEB-INF/lib/midan-authenticator-${MIDANAUTHENTICATOR_VERSION:0:3}.jar \
+ &&  apk del .build-deps \
+ &&  rm -rf /var/cache/apk/*
 
-# Default to UTF-8 file.encoding
-ENV LANG C.UTF-8
+HEALTHCHECK CMD nc -z 127.0.0.1 8080
 
-# add a simple script that can auto-detect the appropriate JAVA_HOME value
-# based on whether the JDK or only the JRE is installed
-RUN { \
-    echo '#!/bin/sh'; \
-    echo 'set -e'; \
-    echo; \
-    echo 'dirname "$(dirname "$(readlink -f "$(which javac || which java)")")"'; \
-  } > /usr/local/bin/docker-java-home \
-  && chmod +x /usr/local/bin/docker-java-home
+VOLUME /app/.oracle_jre_usage /app/work /app/logs /tmp
+ENTRYPOINT ["servicedesk"]
+ADD docker-entrypoint.sh /bin/servicedesk
 
-ENV JAVA_HOME /usr/lib/jvm/java-8-openjdk-amd64/jre
+ADD scripts/main /main
+ADD scripts/vars /vars
+ADD scripts/crowd-sso-configurator        /crowd-sso-configurator
+ADD scripts/jira-servicedesk-configurator /jira-servicedesk-configurator
 
-
-RUN set -x \
-  && [ "$JAVA_HOME" = "$(docker-java-home)" ]
-
-# Configuration variables.
-ENV JIRA_HOME     /var/atlassian/jira
-ENV JIRA_INSTALL  /opt/atlassian/jira
-ENV JIRA_SOFTWARE_VERSION  7.11.2
-ENV JIRA_SERVICEDESK_VERSION  3.14.2
-ENV MYSQL_JCONNECTOR 5.1.38
-
-# Install Atlassian JIRA and helper tools and setup initial home
-# directory structure.
-RUN set -x \
-    && mkdir -p                "${JIRA_HOME}" \
-    && mkdir -p                "${JIRA_HOME}/caches/indexes" \
-    && chmod -R 700            "${JIRA_HOME}" \
-    && chown -R daemon:daemon  "${JIRA_HOME}" \
-    && mkdir -p                "${JIRA_INSTALL}/conf/Catalina"
-
-## Installatation de Jira SOFTWARE
-RUN curl -Ls "https://nexus.sec.cloudwatt.com/nexus/content/sites/external/jira/atlassian-jira-software-${JIRA_SOFTWARE_VERSION}.tar.gz" | tar -xvz --directory "${JIRA_INSTALL}" --strip-components=1 --no-same-owner
-
-## Installatation de Jira ServiceDesk
-RUN curl -Ls "https://nexus.sec.cloudwatt.com/nexus/content/sites/external/jira/atlassian-servicedesk-${JIRA_SERVICEDESK_VERSION}.tar.gz" | tar -xvz --directory "${JIRA_INSTALL}" --strip-components=1 --no-same-owner
-
-# Installation de Mysql 8.0.11
-# RUN curl -Ls "https://nexus.sec.cloudwatt.com/nexus/content/sites/external/mysql/mysql-connector-java-${MYSQL_JCONNECTOR}.tar.gz" | tar -xvz --directory "${JIRA_INSTALL}/lib" --strip-components=1 --no-same-owner "mysql-connector-java-${MYSQL_JCONNECTOR}/mysql-connector-java-${MYSQL_JCONNECTOR}.jar"
-
-# Installation de Mysql 5.1.38
-RUN curl -Ls "https://nexus.sec.cloudwatt.com/nexus/content/sites/external/mysql/mysql-connector-java-${MYSQL_JCONNECTOR}.jar" -o ${JIRA_INSTALL}/lib/mysql-connector-java-${MYSQL_JCONNECTOR}.jar
-
-RUN chmod -R 700            "${JIRA_INSTALL}/conf" \
-    && chmod -R 700            "${JIRA_INSTALL}/logs" \
-    && chmod -R 700            "${JIRA_INSTALL}/temp" \
-    && chmod -R 700            "${JIRA_INSTALL}/work" \
-    && chown -R daemon:daemon  "${JIRA_INSTALL}/conf" \
-    && chown -R daemon:daemon  "${JIRA_INSTALL}/logs" \
-    && chown -R daemon:daemon  "${JIRA_INSTALL}/temp" \
-    && chown -R daemon:daemon  "${JIRA_INSTALL}/work"
-
-RUN chown     daemon:daemon  "${JIRA_INSTALL}/bin" \
-    && chown  daemon:daemon  "${JIRA_INSTALL}/bin/setenv.sh"
-
-RUN echo -e                 "\njira.home=$JIRA_HOME" >> "${JIRA_INSTALL}/atlassian-jira/WEB-INF/classes/jira-application.properties" \
-    && touch -d "@0"           "${JIRA_INSTALL}/conf/server.xml" \
-    && echo '#!/bin/sh' > /opt/atlassian/jira/bin/check-java.sh
-
-
-RUN sed -i '/JVM_MINIMUM_MEMORY="384m"/D' "${JIRA_INSTALL}/bin/setenv.sh"
-RUN sed -i '/JVM_MAXIMUM_MEMORY="768m"/D' "${JIRA_INSTALL}/bin/setenv.sh"
-RUN echo "" > /etc/java-8-openjdk/accessibility.properties
-
-# Use the default unprivileged account. This could be considered bad practice
-# on systems where multiple processes end up being executed by 'daemon' but
-# here we only ever run one process anyway.
-USER daemon:daemon
-
-# Expose default HTTP connector port.
-EXPOSE 8080
-
-# Set volume mount points for installation and home directory. Changes to the
-# home directory needs to be persisted as well as parts of the installation
-# directory due to eg. logs.
-VOLUME ["/var/atlassian/jira", "/opt/atlassian/jira/logs"]
-
-# Set the default working directory as the installation directory.
-WORKDIR /var/atlassian/jira
-
-COPY "docker-entrypoint.sh" "/"
-ENTRYPOINT ["/docker-entrypoint.sh"]
-
-# Run Atlassian JIRA as a foreground process by default.
-CMD ["/opt/atlassian/jira/bin/catalina.sh", "run"]
